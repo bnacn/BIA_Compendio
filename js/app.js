@@ -2,13 +2,13 @@
    Compendio BIA — app.js
    SPA liviana, sin dependencias externas.
    ============================================================ */
- 
+
 const state = {
   hierarchy: null,
   salidas: null,        // { id: {...} }
   salidasList: [],       // array ordenado
 };
- 
+
 // ---------------------------------------------------------------
 // Carga de datos
 // ---------------------------------------------------------------
@@ -16,12 +16,32 @@ const state = {
 // Los datos ya no viven en /data del repo: se piden acá, y Cloudflare
 // Access exige login con email @bna.com.ar antes de devolver nada.
 const WORKER_BASE_URL = 'https://bia-api.cfranco-0ba.workers.dev';
- 
+
+function irALoginYVolver() {
+  const yaReintentado = new URLSearchParams(location.search).has('authRetry');
+  if (yaReintentado) return false;
+  const separador = location.href.includes('?') ? '&' : '?';
+  const volverA = location.href + separador + 'authRetry=1';
+  location.href = `${WORKER_BASE_URL}/api/login?return=${encodeURIComponent(volverA)}`;
+  return true;
+}
+
 async function fetchProtegido(clave){
-  const res = await fetch(`${WORKER_BASE_URL}/api/data/${clave}`, {
-    cache: 'no-cache',
-    credentials: 'include', // manda la cookie de sesión de Cloudflare Access
-  });
+  let res;
+  try {
+    res = await fetch(`${WORKER_BASE_URL}/api/data/${clave}`, {
+      cache: 'no-cache',
+      credentials: 'include', // manda la cookie de sesión de Cloudflare Access
+    });
+  } catch (err) {
+    if (irALoginYVolver()) {
+      return new Promise(() => {});
+    }
+    throw new Error(
+      `No se pudo conectar con la API de datos. Si ya iniciaste sesión y ` +
+      `seguís viendo esto, recargá la página o avisale a Carlos.`
+    );
+  }
   if (res.status === 401 || res.status === 403) {
     throw new Error(
       `No autorizado para acceder a "${clave}". Iniciá sesión con tu email ` +
@@ -33,7 +53,7 @@ async function fetchProtegido(clave){
   }
   return res.json();
 }
- 
+
 async function loadData(){
   const [hierarchy, salidas] = await Promise.all([
     fetchProtegido('hierarchy'),
@@ -43,7 +63,7 @@ async function loadData(){
   state.salidas = salidas;
   state.salidasList = Object.values(salidas).sort((a,b)=> a.nombre.localeCompare(b.nombre,'es'));
 }
- 
+
 // ---------------------------------------------------------------
 // Utilidades
 // ---------------------------------------------------------------
@@ -59,7 +79,7 @@ function totalUnidades(){
   state.hierarchy.jefaturas_principales.forEach(jp=>jp.jefaturas.forEach(j=>n+=j.unidades.length));
   return n;
 }
- 
+
 // ---------------------------------------------------------------
 // Árbol lateral
 // ---------------------------------------------------------------
@@ -67,7 +87,7 @@ function renderTree(){
   const el = document.getElementById('tree');
   const h = state.hierarchy;
   let html = `<div class="t-jp"><div class="t-label">${esc(h.nombre)}</div>`;
- 
+
   h.jefaturas_principales.forEach((jp, jpIdx)=>{
     html += `<div class="t-jef" data-jp="${jpIdx}"><div class="t-label"><span class="chev">▶</span>${esc(jp.nombre)}</div><div class="t-jef-body">`;
     jp.jefaturas.forEach((jef, jefIdx)=>{
@@ -91,12 +111,12 @@ function renderTree(){
     });
     html += `</div></div>`;
   });
- 
+
   el.innerHTML = html;
- 
+
   // Reutilizar clases .t-jef para nivel jefatura y .t-jef2 para nivel jefatura tambien (mismo estilo)
   el.querySelectorAll('.t-jef2').forEach(n=> n.classList.add('t-jef'));
- 
+
   // Eventos: togglear grupos
   el.querySelectorAll('.t-jef > .t-label').forEach(lbl=>{
     lbl.addEventListener('click', ()=> lbl.parentElement.classList.toggle('open'));
@@ -108,7 +128,7 @@ function renderTree(){
     node.addEventListener('click', ()=>{ location.hash = '#/salida/' + node.dataset.sid; });
   });
 }
- 
+
 function expandPathTo(sid){
   const el = document.getElementById('tree');
   const node = el.querySelector(`.t-salida[data-sid="${sid}"]`);
@@ -122,7 +142,7 @@ function expandPathTo(sid){
   }
   node.scrollIntoView({block:'nearest'});
 }
- 
+
 // ---------------------------------------------------------------
 // Buscador
 // ---------------------------------------------------------------
@@ -158,7 +178,7 @@ function setupSearch(){
     });
   });
 }
- 
+
 // ---------------------------------------------------------------
 // Vistas
 // ---------------------------------------------------------------
@@ -177,7 +197,7 @@ function viewHome(){
     });
     jpBlocks += `<div class="jp-block"><div class="jp-title">${esc(jp.nombre)}</div>${jefCards}</div>`;
   });
- 
+
   const html = `
     <div class="home-hero">
       <div class="inner">
@@ -212,7 +232,7 @@ function viewHome(){
           llegar directo a una salida, unidad o aplicativo.</p>
         </div>
       </div>
- 
+
       <div class="jef-index">
         <h2>Índice por Jefatura</h2>
         ${jpBlocks}
@@ -224,20 +244,20 @@ function viewHome(){
     chip.addEventListener('click', ()=>{ location.hash = '#/salida/' + chip.dataset.firstSid; });
   });
 }
- 
+
 function nodeClass(tipo){
   if (tipo === 'Interno') return 'int';
   if (tipo === 'Externo') return 'ext';
   return 'free';
 }
- 
+
 function viewSalida(sid){
   const s = state.salidas[sid];
   if (!s){
     document.getElementById('content').innerHTML = `<div class="page"><p>No se encontró la salida #${esc(sid)}.</p></div>`;
     return;
   }
- 
+
   // Predecesoras: entidades tipadas + texto libre (sin duplicar si ya aparece como entidad)
   const predEntNombres = new Set(s.predecesoras_entidad.map(p=>p.entidad));
   let predHtml = '';
@@ -249,14 +269,14 @@ function viewSalida(sid){
     predHtml += `<div class="node free"><small>Insumo / referencia</small>${esc(t)}</div>`;
   });
   if (!predHtml) predHtml = `<div class="flow-col-empty">Sin predecesoras registradas — es punto de inicio del flujo.</div>`;
- 
+
   // Sucesoras
   let sucHtml = '';
   s.sucesoras.forEach(su=>{
     sucHtml += `<div class="node ${nodeClass(su.tipo)}"><small>${esc(su.tipo)}</small>${esc(su.entidad)}</div>`;
   });
   if (!sucHtml) sucHtml = `<div class="flow-col-empty">Sin sucesoras registradas.</div>`;
- 
+
   // Pasos
   let stepsHtml = '';
   if (s.actividades.length){
@@ -266,7 +286,7 @@ function viewSalida(sid){
   } else {
     stepsHtml = `<div class="steps-empty">No hay actividades paso a paso relevadas todavía para esta salida — a completar en la entrevista.</div>`;
   }
- 
+
   // Aplicativos / procesos / subproductos
   const appsHtml = s.aplicativos.length
     ? s.aplicativos.map(a=>{
@@ -274,14 +294,14 @@ function viewSalida(sid){
         return `<span class="tag tag-app">${esc(a)}${rpo ? ' · RPO ' + esc(rpo.rpo) : ''}</span>`;
       }).join('')
     : '<span class="flow-col-empty">Sin aplicativos vinculados.</span>';
- 
+
   const procHtml = s.procesos_centrales.length
     ? s.procesos_centrales.map(p=>`<span class="tag tag-proc">${esc(p)}</span>`).join('')
     : '';
   const subHtml = s.subproductos.length
     ? s.subproductos.map(p=>`<span class="tag">${esc(p)}</span>`).join('')
     : '';
- 
+
   // Proveedores
   let provRows = '';
   if (s.proveedores.length){
@@ -300,7 +320,7 @@ function viewSalida(sid){
   const provBlock = s.proveedores.length
     ? `<table class="prov-table"><thead><tr><th>Proveedor</th><th>Rubro</th><th>Servicio</th><th>Vínculo con la salida</th></tr></thead><tbody>${provRows}</tbody></table>`
     : `<p class="flow-col-empty">No hay proveedores relevados para la unidad organizativa de esta salida.</p>`;
- 
+
   const html = `
     <div class="page">
       <div class="breadcrumb">
@@ -309,7 +329,7 @@ function viewSalida(sid){
         <span>${esc(s.jefatura)}</span><span class="sep">/</span>
         <span>${esc(s.unidad_organizativa_agrupada)}</span>
       </div>
- 
+
       <div class="ficha-head">
         <div>
           <h1>${esc(s.nombre)}</h1>
@@ -324,13 +344,13 @@ function viewSalida(sid){
           <button class="print-btn" onclick="window.print()">🖨 Imprimir ficha</button>
         </div>
       </div>
- 
+
       <div class="section-title">Descripción</div>
       <div class="desc-block">${esc(s.descripcion || 'Sin descripción registrada.')}</div>
       ${s.nota_turnos ? `<div class="desc-block" style="border-left-color:var(--gold-500); margin-top:8px; font-style:italic;">🕑 ${esc(s.nota_turnos)}</div>` : ''}
- 
+
       <div class="tag-row" style="margin-top:14px;">${procHtml}${subHtml}</div>
- 
+
       <div class="section-title">Flujograma de la salida</div>
       <div class="flow">
         <div class="flow-col pred">
@@ -346,10 +366,10 @@ function viewSalida(sid){
           ${sucHtml}
         </div>
       </div>
- 
+
       <div class="section-title">Aplicativos utilizados</div>
       <div class="tag-row">${appsHtml}</div>
- 
+
       <div class="section-title">Proveedores de la unidad</div>
       <p style="font-size:11.5px;color:var(--gray-500);margin:0 0 6px;">
         Los proveedores se relevan a nivel Unidad Organizativa en el BIA, no por salida individual.
@@ -357,7 +377,7 @@ function viewSalida(sid){
         se indica el vínculo puntual; el resto figura como proveedor crítico general de la unidad a confirmar en la entrevista.
       </p>
       ${provBlock}
- 
+
       <div class="interview-box">
         <h4>Guía rápida para la entrevista de continuidad</h4>
         <ul>
@@ -368,7 +388,7 @@ function viewSalida(sid){
           <li>¿A quién se le comunica el resultado (sucesoras) si el circuito habitual no está disponible?</li>
         </ul>
       </div>
- 
+
       <div class="foot-nav">
         <span>${s.comentarios_predecesoras ? '<b>Nota:</b> ' + esc(s.comentarios_predecesoras) : ''}</span>
       </div>
@@ -377,7 +397,7 @@ function viewSalida(sid){
   document.getElementById('content').innerHTML = html;
   expandPathTo(sid);
 }
- 
+
 function viewGlosario(){
   const html = `
     <div class="page">
@@ -387,26 +407,26 @@ function viewGlosario(){
         <div class="gloss-item"><dt>Salida incluida en alcance</dt>
         <dd>Salida crítica del BIA para la cual se definió (campo "Incorporación en Alcance" = SI) que debe contar
         con estrategia de continuidad y plan asociado. Son 43 sobre el total relevado.</dd></div>
- 
+
         <div class="gloss-item"><dt>Predecesora</dt>
         <dd>Entidad, unidad o insumo que debe estar disponible antes de poder ejecutar la salida (entrada del proceso).</dd></div>
- 
+
         <div class="gloss-item"><dt>Sucesora</dt>
         <dd>Entidad o unidad interna/externa que recibe el resultado de la salida (destino del proceso).</dd></div>
- 
+
         <div class="gloss-item"><dt>RTO (Recovery Time Objective)</dt>
         <dd>Tiempo máximo tolerable de interrupción para esta salida. Es una prioridad temporal de recuperación,
         no un indicador de importancia del negocio en sí.</dd></div>
- 
+
         <div class="gloss-item"><dt>RPO (Recovery Point Objective)</dt>
         <dd>Antigüedad máxima admisible de los datos al momento de la recuperación, por aplicativo.</dd></div>
- 
+
         <div class="gloss-item"><dt>M.E.P.</dt>
         <dd>Medio Electrónico de Pagos. Se escribe con puntos, no "MEP".</dd></div>
- 
+
         <div class="gloss-item"><dt>Entidad Interna / Externa</dt>
         <dd>Interna: otra unidad o sector de BNA. Externa: organismo o contraparte fuera del banco (BCRA, COELSA, ARCA, etc.).</dd></div>
- 
+
         <div class="gloss-item"><dt>Proveedor de la unidad</dt>
         <dd>Proveedor crítico relevado a nivel Unidad Organizativa. No está atado a una salida puntual en el
         modelo de datos del BIA, por eso se muestra a nivel de unidad en cada ficha.</dd></div>
@@ -415,7 +435,7 @@ function viewGlosario(){
   `;
   document.getElementById('content').innerHTML = html;
 }
- 
+
 // ---------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------
@@ -432,7 +452,7 @@ function router(){
     document.querySelectorAll('.t-salida').forEach(n=>n.classList.remove('active'));
   }
 }
- 
+
 // ---------------------------------------------------------------
 // Sidebar toggle
 // ---------------------------------------------------------------
@@ -441,7 +461,7 @@ function setupSidebarToggle(){
   document.getElementById('sidebarToggle').addEventListener('click', ()=> app.classList.add('collapsed'));
   document.getElementById('sidebarToggleCollapsed').addEventListener('click', ()=> app.classList.remove('collapsed'));
 }
- 
+
 // ---------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------
@@ -453,4 +473,3 @@ function setupSidebarToggle(){
   window.addEventListener('hashchange', router);
   router();
 })();
- 

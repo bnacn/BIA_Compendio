@@ -15,7 +15,7 @@ const state = {
 // URL del Worker que sirve los datos protegidos (mismo que usa Portal_BIA).
 // Los datos ya no viven en /data del repo: se piden acá, y Cloudflare
 // Access exige login con email @bna.com.ar antes de devolver nada.
-const WORKER_BASE_URL = 'https://bia-api.cfranco-0ba.workers.dev';
+const WORKER_BASE_URL = 'https://bia-api.bna-continuidad.workers.dev';
 
 function irALoginYVolver() {
   const yaReintentado = new URLSearchParams(location.search).has('authRetry');
